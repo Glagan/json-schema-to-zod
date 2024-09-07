@@ -25,13 +25,13 @@ export class JSONSchemaToZod {
 				zodSchema = this.parseString(schema);
 				break;
 			case 'number':
-				zodSchema = z.number();
+				zodSchema = this.parseNumber(schema);
 				break;
 			case 'integer':
-				zodSchema = z.number().int();
+				zodSchema = this.parseNumber(schema, true);
 				break;
 			case 'boolean':
-				zodSchema = z.boolean();
+				zodSchema = this.parseBoolean(schema);
 				break;
 			case 'array':
 				zodSchema = this.parseArray(schema);
@@ -58,7 +58,11 @@ export class JSONSchemaToZod {
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
 	 */
-	private static parseString(schema: JSONSchema): ZodTypeAny {
+	private static parseString(schema: JSONSchema): z.ZodLiteral<string | number | boolean> | z.ZodEnum<any> | z.ZodString {
+		if (schema.const) {
+			return z.literal(schema.const);
+		}
+
 		if (schema.enum) {
 			const values = schema.enum.map((enumValue) => String(enumValue));
 			return z.enum([values[0], ...values.slice(1)]);
@@ -68,17 +72,65 @@ export class JSONSchemaToZod {
 		let zodSchema = z.string();
 		switch (schema.format) {
 			case 'email':
-				return zodSchema.email();
+				zodSchema = zodSchema.email();
+				break;
 			case 'date-time':
-				return zodSchema.datetime();
+				zodSchema = zodSchema.datetime();
+				break;
 			case 'uri':
-				return zodSchema.url();
+				zodSchema = zodSchema.url();
+				break;
 			case 'uuid':
-				return zodSchema.uuid();
+				zodSchema = zodSchema.uuid();
+				break;
 			case 'date':
-				return zodSchema.date();
+				zodSchema = zodSchema.date();
+				break;
+		}
+		if (schema.minLength) {
+			zodSchema = zodSchema.min(schema.minLength);
+		}
+		if (schema.maxLength) {
+			zodSchema = zodSchema.max(schema.maxLength);
 		}
 		return zodSchema;
+	}
+
+	/**
+	 * Parses a JSON schema of type number or integer and returns the corresponding Zod schema.
+	 *
+	 * @param {JSONSchema} schema - The JSON schema.
+	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
+	 */
+	private static parseNumber(schema: JSONSchema, integer?: boolean): z.ZodLiteral<string | number | boolean> | z.ZodNumber {
+		if (schema.const) {
+			return z.literal(schema.const);
+		}
+
+		let zodSchema = z.number();
+		if (integer) {
+			zodSchema = zodSchema.int();
+		}
+		if (schema.minimum) {
+			zodSchema = zodSchema.min(schema.minimum);
+		}
+		if (schema.maximum) {
+			zodSchema = zodSchema.max(schema.maximum);
+		}
+		return zodSchema;
+	}
+
+	/**
+	 * Parses a JSON schema of type number or integer and returns the corresponding Zod schema.
+	 *
+	 * @param {JSONSchema} schema - The JSON schema.
+	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
+	 */
+	private static parseBoolean(schema: JSONSchema): z.ZodLiteral<string | number | boolean> | z.ZodBoolean {
+		if (schema.const) {
+			return z.literal(schema.const);
+		}
+		return z.boolean();
 	}
 
 	/**
