@@ -1,16 +1,14 @@
 import { z, ZodSchema, type ZodTypeAny, ZodObject } from 'zod';
 import { type JSONSchema } from './Type';
 
-export class JSONSchemaToZod
-{
+export class JSONSchemaToZod {
 	/**
 	 * Converts a JSON schema to a Zod schema.
 	 *
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodSchema} - The Zod schema.
 	 */
-	public static convert(schema: JSONSchema): ZodSchema
-	{
+	public static convert(schema: JSONSchema): ZodSchema {
 		return this.parseSchema(schema);
 	}
 
@@ -20,25 +18,38 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
 	 */
-	private static parseSchema(schema: JSONSchema): ZodTypeAny
-	{
-		switch (schema.type)
-		{
+	private static parseSchema(schema: JSONSchema): ZodTypeAny {
+		let zodSchema: ZodTypeAny;
+		switch (schema.type) {
 			case 'string':
-				return this.parseString(schema);
+				zodSchema = this.parseString(schema);
+				break;
 			case 'number':
-				return z.number();
+				zodSchema = z.number();
+				break;
 			case 'integer':
-				return z.number().int();
+				zodSchema = z.number().int();
+				break;
 			case 'boolean':
-				return z.boolean();
+				zodSchema = z.boolean();
+				break;
 			case 'array':
-				return this.parseArray(schema);
+				zodSchema = this.parseArray(schema);
+				break;
 			case 'object':
-				return this.parseObject(schema);
+				zodSchema = this.parseObject(schema);
+				break;
 			default:
-				return this.parseCombinator(schema);
+				zodSchema = this.parseCombinator(schema);
+				break;
 		}
+		if (schema.description) {
+			zodSchema = zodSchema.describe(schema.description);
+		}
+		if (schema.default) {
+			zodSchema = zodSchema.default(schema.default);
+		}
+		return zodSchema;
 	}
 
 	/**
@@ -47,40 +58,26 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
 	 */
-	private static parseString(schema: JSONSchema): ZodTypeAny
-	{
-		let zodSchema = z.string();
+	private static parseString(schema: JSONSchema): ZodTypeAny {
+		if (schema.enum) {
+			const values = schema.enum.map((enumValue) => String(enumValue));
+			return z.enum([values[0], ...values.slice(1)]);
+		}
 
 		// Apply format-specific methods
-		switch (schema.format)
-		{
+		let zodSchema = z.string();
+		switch (schema.format) {
 			case 'email':
-				zodSchema = zodSchema.email();
-				break;
+				return zodSchema.email();
 			case 'date-time':
-				zodSchema = zodSchema.datetime();
-				break;
+				return zodSchema.datetime();
 			case 'uri':
-				zodSchema = zodSchema.url();
-				break;
+				return zodSchema.url();
 			case 'uuid':
-				zodSchema = zodSchema.uuid();
-				break;
+				return zodSchema.uuid();
 			case 'date':
-				zodSchema = zodSchema.date();
-				break;
-			default:
-				break;
+				return zodSchema.date();
 		}
-
-		// Apply enum validation last to retain ZodString methods
-		if (schema.enum)
-		{
-			return zodSchema.refine((val) => schema.enum?.includes(val), {
-				message: `Value must be one of: ${schema.enum?.join(', ')}`
-			});
-		}
-
 		return zodSchema;
 	}
 
@@ -90,10 +87,8 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
 	 */
-	private static parseArray(schema: JSONSchema): ZodTypeAny
-	{
-		if (!schema.items)
-		{
+	private static parseArray(schema: JSONSchema): ZodTypeAny {
+		if (!schema.items) {
 			throw new Error('Array schema must have "items" defined');
 		}
 
@@ -110,29 +105,24 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodObject<any>} - The ZodObject schema.
 	 */
-	private static parseObject(schema: JSONSchema): ZodObject<any>
-	{
+	private static parseObject(schema: JSONSchema): ZodObject<any> {
 		const shape: Record<string, ZodTypeAny> = {};
 		const required = new Set(schema.required || []);
 
-		for (const [key, value] of Object.entries(schema.properties || {}))
-		{
+		for (const [key, value] of Object.entries(schema.properties || {})) {
 			const zodSchema = this.parseSchema(value);
 			shape[key] = required.has(key) ? zodSchema : zodSchema.optional();
 		}
 
 		let zodObject: z.ZodObject<any>;
 
-		if (schema.additionalProperties === true)
-		{
+		if (schema.additionalProperties === true) {
 			zodObject = z.object(shape).catchall(z.any()).strip();
 		}
-		else if (schema.additionalProperties && typeof schema.additionalProperties === 'object')
-		{
+		else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
 			zodObject = z.object(shape).catchall(this.parseSchema(schema.additionalProperties)).strip();
 		}
-		else
-		{
+		else {
 			zodObject = z.object(shape).strict();
 		}
 
@@ -145,35 +135,26 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} schema - The JSON schema.
 	 * @returns {ZodTypeAny} - The ZodTypeAny schema.
 	 */
-	private static parseCombinator(schema: JSONSchema): ZodTypeAny
-	{
-		if (schema.oneOf)
-		{
-			if (schema.oneOf.length === 1)
-			{
+	private static parseCombinator(schema: JSONSchema): ZodTypeAny {
+		if (schema.oneOf) {
+			if (schema.oneOf.length === 1) {
 				return this.parseSchema(schema.oneOf[0]);
 			}
-			else if (schema.oneOf.length > 1)
-			{
+			else if (schema.oneOf.length > 1) {
 				return z.union(schema.oneOf.map((subSchema) => this.parseSchema(subSchema)) as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
 			}
 		}
-		if (schema.anyOf)
-		{
-			if (schema.anyOf.length === 1)
-			{
+		if (schema.anyOf) {
+			if (schema.anyOf.length === 1) {
 				return this.parseSchema(schema.anyOf[0]);
 			}
-			else if (schema.anyOf.length > 1)
-			{
+			else if (schema.anyOf.length > 1) {
 				return z.union(schema.anyOf.map((subSchema) => this.parseSchema(subSchema)) as [ZodTypeAny, ZodTypeAny, ...ZodTypeAny[]]);
 			}
 		}
-		if (schema.allOf)
-		{
+		if (schema.allOf) {
 			const baseSchema = schema.allOf[0];
-			const mergedSchema = schema.allOf.slice(1).reduce((acc, currentSchema) =>
-			{
+			const mergedSchema = schema.allOf.slice(1).reduce((acc, currentSchema) => {
 				return this.mergeSchemas(acc, currentSchema);
 			}, baseSchema);
 			return this.parseSchema(mergedSchema);
@@ -188,15 +169,12 @@ export class JSONSchemaToZod
 	 * @param {JSONSchema} addSchema - The JSON schema to add.
 	 * @returns {JSONSchema} - The merged JSON schema
 	 */
-	private static mergeSchemas(baseSchema: JSONSchema, addSchema: JSONSchema): JSONSchema
-	{
+	private static mergeSchemas(baseSchema: JSONSchema, addSchema: JSONSchema): JSONSchema {
 		const merged: JSONSchema = { ...baseSchema, ...addSchema };
-		if (baseSchema.properties && addSchema.properties)
-		{
+		if (baseSchema.properties && addSchema.properties) {
 			merged.properties = { ...baseSchema.properties, ...addSchema.properties };
 		}
-		if (baseSchema.required && addSchema.required)
-		{
+		if (baseSchema.required && addSchema.required) {
 			merged.required = Array.from(new Set([...baseSchema.required, ...addSchema.required]));
 		}
 		return merged;
